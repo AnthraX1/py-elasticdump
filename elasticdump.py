@@ -75,7 +75,7 @@ if __name__ == "__main__":
     url=urlparse(args.host)
     es=Elasticsearch(url.netloc,request_timeout=5,timeout=args.timeout)
     if url.scheme=='https':
-        es=Elasticsearch(url.netloc,use_ssl=True,verify_certs=False,request_timeout=5,timeout=120)
+        es=Elasticsearch(url.netloc,use_ssl=True,verify_certs=False,request_timeout=5,timeout=args.timeout)
     outq=Queue(maxsize=50000)
     alldone=Event()
     dumpproc=Process(target=dump,args=(es,outq,alldone))
