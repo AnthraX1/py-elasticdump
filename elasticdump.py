@@ -67,7 +67,7 @@ if __name__ == "__main__":
     parser.add_argument('--host', help='ES host, http[s]://host:port',required=True)
     parser.add_argument('--index',help='Index name or index pattern, for example, logstash-* will work as well. Use _all for all indices', required=True)
     parser.add_argument('--size',help='Scroll size',default=500)
-    parser.add_argument('--timeout',help='Read timeout. Wait time for long queries.',default=300)
+    parser.add_argument('--timeout',help='Read timeout. Wait time for long queries.',default=300, type=int)
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--query', help='Query string in Elasticsearch DSL format.')
     group.add_argument('--q', help='Query string in Lucene query format.')
