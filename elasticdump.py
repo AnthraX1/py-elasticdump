@@ -3,6 +3,7 @@ import argparse
 import requests
 import os
 import time
+import sys
 import simplejson as json
 from urlparse import urlparse
 from multiprocessing import Process, Queue, Event
