@@ -2,8 +2,8 @@ from elasticsearch import Elasticsearch
 import argparse
 import requests
 import os
-import time
 import sys
+import time
 import simplejson as json
 from urlparse import urlparse
 from multiprocessing import Process, Queue, Event
@@ -35,7 +35,16 @@ def dump(es,outq,alldone):
             r= ES21scroll(sid)
         else:
             r = es.scroll(scroll_id=sid, scroll=TIMEOUT)
+
+    if '_scroll_id' in r:
+        sid=r["_scroll_id"]
+        f=open(url.netloc+'_'+args.index+'.session','w')
+        f.write(sid+"\n")
+        f.close()
+    cnt=0
     while '_scroll_id' in r and len(r['hits']['hits'])>0:
+        cnt+=len(r['hits']['hits'])
+        display("\rDumped {} documents".format(cnt))
         if sid!=r['_scroll_id']:
             f=open(url.netloc+'_'+args.index+'.session','w')
             f.write(sid+"\n")
