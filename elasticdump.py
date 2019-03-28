@@ -35,6 +35,7 @@ def dump(es,outq,alldone):
             r= ES21scroll(sid)
         else:
             r = es.scroll(scroll_id=sid, scroll=TIMEOUT)
+        display("Continue session...")
 
     if '_scroll_id' in r:
         sid=r["_scroll_id"]
@@ -61,6 +62,7 @@ def dump(es,outq,alldone):
             print e
             break
     alldone.set()
+    display("All done!")
 
 
 
