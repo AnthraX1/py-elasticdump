@@ -9,7 +9,7 @@ from urlparse import urlparse
 from multiprocessing import Process, Queue, Event
 
 #ES default to 24 hours max
-TIMEOUT = "1d" 
+TIMEOUT = "1d"
 
 def ES21scroll(sid):
     return json.loads(requests.get("{}/_search/scroll?scroll={}".format(args.host,TIMEOUT),data=sid,verify=False).text)
@@ -27,6 +27,7 @@ def dump(es,outq,alldone):
         else:
             r = es.search(args.index, sort=["_doc"],size=args.size, scroll=TIMEOUT,q=args.q, body=args.query)
         display("Total docs:"+str(r["hits"]["total"]))
+        total=r["hits"]["total"]
     else:
         fs=open(url.netloc+'_'+args.index+'.session','r')
         sid=fs.readlines()[0].strip()
@@ -43,7 +44,9 @@ def dump(es,outq,alldone):
         f.write(sid+"\n")
         f.close()
     cnt=0
-    while '_scroll_id' in r and len(r['hits']['hits'])>0:
+    while True:
+        if 'hits' in r and '_scroll_id' not in r and len(r['hits']['hits'])==0:
+            break
         cnt+=len(r['hits']['hits'])
         display("\rDumped {} documents".format(cnt))
         if sid!=r['_scroll_id']:
@@ -53,14 +56,18 @@ def dump(es,outq,alldone):
             sid=r['_scroll_id']
         for row in r['hits']['hits']:
             outq.put(row)
-        try:
-            if esversion <2.1:
+        if esversion <2.1:
+            try:
                 r = ES21scroll(sid)
-            else:
+            except Exception as e:
+                display(str(e))
+                continue
+        else:
+            try:
                 r = es.scroll(scroll_id=sid, scroll=TIMEOUT)
-        except Exception as e:
-            print e
-            break
+            except Exception as e:
+                display(str(e))
+                continue
     alldone.set()
     display("All done!")
 
