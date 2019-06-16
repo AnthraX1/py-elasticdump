@@ -45,7 +45,7 @@ def dump(es,outq,alldone):
         f.close()
     cnt=0
     while True:
-        if 'hits' in r and '_scroll_id' not in r and len(r['hits']['hits'])==0:
+        if 'hits' in r and len(r['hits']['hits'])==0:
             break
         cnt+=len(r['hits']['hits'])
         display("\rDumped {} documents".format(cnt))
