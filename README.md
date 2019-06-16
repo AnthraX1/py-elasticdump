@@ -1,3 +1,3 @@
 # py-elasticdump
 
-Saves session file in current directory to resume later.
+Dump elasticsearch index/indices without breaking.
