@@ -12,7 +12,13 @@ from multiprocessing import Process, Queue, Event
 TIMEOUT = "1d"
 
 def ES21scroll(sid):
-    return json.loads(requests.get("{}/_search/scroll?scroll={}".format(args.host,TIMEOUT),data=sid,verify=False).text)
+    return json.loads(requests.post("{}/_search/scroll?scroll={}".format(args.host,TIMEOUT),data=sid,verify=False).text)
+
+def ESscroll(sid):
+    return json.loads(requests.post("{}/_search/scroll".format(args.host),
+               data=json.dumps({"scroll":TIMEOUT,"scroll_id":sid}),verify=False,
+               headers={"Content-Type":"application/json"}).text)
+
 
 def display(msg):
     sys.stderr.write(msg+"\n")
@@ -35,7 +41,7 @@ def dump(es,outq,alldone):
         if esversion<2.1:
             r= ES21scroll(sid)
         else:
-            r = es.scroll(scroll_id=sid, scroll=TIMEOUT)
+            r = ESscroll(sid)
         display("Continue session...")
 
     if '_scroll_id' in r:
@@ -61,12 +67,14 @@ def dump(es,outq,alldone):
                 r = ES21scroll(sid)
             except Exception as e:
                 display(str(e))
+                display(json.dumps(r))
                 continue
         else:
             try:
-                r = es.scroll(scroll_id=sid, scroll=TIMEOUT)
+                r = ESscroll(sid)
             except Exception as e:
                 display(str(e))
+                display(json.dumps(r))
                 continue
     alldone.set()
     display("All done!")
