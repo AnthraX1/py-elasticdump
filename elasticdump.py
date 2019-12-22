@@ -27,11 +27,11 @@ def dump(es,outq,alldone):
     esversion = getVersion(es)
     if not os.path.isfile(url.netloc+'_'+args.index+'.session'):
         if esversion< 2.1:
-            r = es.search(args.index, search_type="scan",size=args.size, scroll=TIMEOUT,q=args.q, body=args.query)
+            r = es.search(args.index, search_type="scan",size=args.size, scroll=TIMEOUT,q=args.q, body=args.query,_source=args.fields)
             if "_scroll_id" in r:
                 r = ES21scroll(r["_scroll_id"])
         else:
-            r = es.search(args.index, sort=["_doc"],size=args.size, scroll=TIMEOUT,q=args.q, body=args.query)
+            r = es.search(args.index, sort=["_doc"],size=args.size, scroll=TIMEOUT,q=args.q, body=args.query,_source=args.fields)
         display("Total docs:"+str(r["hits"]["total"]))
         total=r["hits"]["total"]
     else:
@@ -95,9 +95,12 @@ if __name__ == "__main__":
     parser.add_argument('--index',help='Index name or index pattern, for example, logstash-* will work as well. Use _all for all indices', required=True)
     parser.add_argument('--size',help='Scroll size',default=500)
     parser.add_argument('--timeout',help='Read timeout. Wait time for long queries.',default=300, type=int)
+    parser.add_argument('--fields', help='Filter output source fields. Separate keys with , (comma).')
+
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--query', help='Query string in Elasticsearch DSL format.')
     group.add_argument('--q', help='Query string in Lucene query format.')
+
     args = parser.parse_args()
     url=urlparse(args.host)
     es=Elasticsearch(url.netloc,request_timeout=5,timeout=args.timeout)
