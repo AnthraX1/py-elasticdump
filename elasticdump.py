@@ -20,6 +20,22 @@ def ESscroll(sid):
                headers={"Content-Type":"application/json"}).text)
 
 
+
+# scc: Open scroll contexts
+# scti: Time scroll contexts held open
+# scto: Completed scroll contexts
+# so: Open search contexts
+# TBD
+def check_dumps():
+    scores=[0,0,0,0]
+    try:
+        node_data=json.loads(requests.get("{}/_cat/nodes?h=scc,scti,scto,so&format=json".format(args.host).text))
+    except Exception as e:
+        display("unable to get open scrolls: {}".format(str(e)))
+        return False
+    
+
+
 def display(msg):
     sys.stderr.write(msg+"\n")
 
@@ -91,21 +107,41 @@ def getVersion(es):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Dump ES index with custom scan_id')
-    parser.add_argument('--host', help='ES host, http[s]://host:port',required=True)
-    parser.add_argument('--index',help='Index name or index pattern, for example, logstash-* will work as well. Use _all for all indices', required=True)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--url',help="Full ES query url to dump, http[s]://host:port/index/_search?q=...")
+    group.add_argument('--host', help='ES host, http[s]://host:port')
+    parser.add_argument('--index',help='Index name or index pattern, for example, logstash-* will work as well. Use _all for all indices')
     parser.add_argument('--size',help='Scroll size',default=500)
     parser.add_argument('--timeout',help='Read timeout. Wait time for long queries.',default=300, type=int)
     parser.add_argument('--fields', help='Filter output source fields. Separate keys with , (comma).')
+    parser.add_argument('--username', help='Username to auth with')
+    parser.add_argument('--password', help='Password to auth with')
 
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('--query', help='Query string in Elasticsearch DSL format.')
-    group.add_argument('--q', help='Query string in Lucene query format.')
+    group1 = parser.add_mutually_exclusive_group()
+    group1.add_argument('--query', help='Query string in Elasticsearch DSL format.')
+    group1.add_argument('--q', help='Query string in Lucene query format.')
 
     args = parser.parse_args()
-    url=urlparse(args.host)
-    es=Elasticsearch(url.netloc,request_timeout=5,timeout=args.timeout)
-    if url.scheme=='https':
-        es=Elasticsearch(url.netloc,use_ssl=True,verify_certs=False,request_timeout=5,timeout=args.timeout)
+    if args.url is None and (args.host or args.index) is None:
+        exit("must provide url or host and index name!")
+
+    if args.url!=None:
+        url=urlparse(args.url)
+        args.host="{}://{}".format(url.scheme,url.netloc)
+        args.index=url.path.split("/")[1]
+        if url.query!="":
+            args.q=url.query.replace("q=","",1)
+    else:
+       url=urlparse(args.host)
+    if args.username and args.password:
+        es=Elasticsearch(url.netloc,request_timeout=5,timeout=args.timeout,http_auth=(args.username,args.password))
+        if url.scheme=='https':
+            es=Elasticsearch(url.netloc,use_ssl=True,verify_certs=False,request_timeout=5,timeout=args.timeout,
+                http_auth=(args.username,args.password))
+    else:
+        es=Elasticsearch(url.netloc,request_timeout=5,timeout=args.timeout)
+        if url.scheme=='https':
+            es=Elasticsearch(url.netloc,use_ssl=True,verify_certs=False,request_timeout=5,timeout=args.timeout)
     outq=Queue(maxsize=50000)
     alldone=Event()
     dumpproc=Process(target=dump,args=(es,outq,alldone))
