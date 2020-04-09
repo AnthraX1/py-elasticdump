@@ -130,7 +130,13 @@ if __name__ == "__main__":
         args.host="{}://{}".format(url.scheme,url.netloc)
         args.index=url.path.split("/")[1]
         if url.query!="":
-            args.q=url.query.replace("q=","",1)
+            qs=url.query.split("&")
+            for qq in qs:
+                qa=qq.split('=')
+                if qa[0]=="q":
+                   args.q=qa[1]
+                if qa[0]=="_source":
+                   args.fields=qa[1]
     else:
        url=urlparse(args.host)
     if args.username and args.password:
