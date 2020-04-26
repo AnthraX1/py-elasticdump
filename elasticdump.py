@@ -39,6 +39,32 @@ def check_dumps():
 def display(msg):
     sys.stderr.write(msg+"\n")
 
+
+def search_after_dump(es,outq,alldone):
+    esversion = getVersion(es)
+    if esversion <2.1 and args.search_after!=None:
+        alldone.set()
+        exit("search_after is not supported before ES version 2.1")    
+    query_body=json.dumps({"search_after":[args.search_after]})
+    r = es.search(args.index, sort=["_doc","tie_breaker_id"],size=args.size, q=args.q, body=query_body,_source=args.fields)
+    display("Total docs:"+str(r["hits"]["total"]))
+    cnt=0
+    while True:
+        if 'hits' in r and len(r['hits']['hits'])==0:
+            break
+        cnt+=len(r['hits']['hits'])
+        for row in r['hits']['hits']:
+            outq.put(row)
+        display("\rDumped {} documents".format(cnt))
+        last_sort_id=r["hits"]["hits"][-1]["sort"][0]
+        display("\rlast sort id {}".format(last_sort_id))
+        query_body=json.dumps({"search_after":[last_sort_id]})
+        r = es.search(args.index, sort=["_doc"],size=args.size, q=args.q, body=query_body,_source=args.fields)
+    alldone.set()
+    display("All done!")
+
+
+
 def dump(es,outq,alldone):
     esversion = getVersion(es)
     if not os.path.isfile(url.netloc+'_'+args.index+'.session'):
@@ -116,6 +142,7 @@ if __name__ == "__main__":
     parser.add_argument('--fields', help='Filter output source fields. Separate keys with , (comma).')
     parser.add_argument('--username', help='Username to auth with')
     parser.add_argument('--password', help='Password to auth with')
+    parser.add_argument('--search_after',help="Recover dump using search_after with sort by _doc",type=int)
 
     group1 = parser.add_mutually_exclusive_group()
     group1.add_argument('--query', help='Query string in Elasticsearch DSL format.')
@@ -150,7 +177,10 @@ if __name__ == "__main__":
             es=Elasticsearch(url.netloc,use_ssl=True,verify_certs=False,request_timeout=5,timeout=args.timeout)
     outq=Queue(maxsize=50000)
     alldone=Event()
-    dumpproc=Process(target=dump,args=(es,outq,alldone))
+    if args.search_after is None:
+        dumpproc=Process(target=dump,args=(es,outq,alldone))
+    else:
+        dumpproc=Process(target=search_after_dump,args=(es,outq,alldone))
     dumpproc.daemon=True
     dumpproc.start()
     while not alldone.is_set() or outq.qsize()>0:
