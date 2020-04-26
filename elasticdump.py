@@ -46,7 +46,7 @@ def search_after_dump(es,outq,alldone):
         alldone.set()
         exit("search_after is not supported before ES version 2.1")    
     query_body=json.dumps({"search_after":[args.search_after]})
-    r = es.search(args.index, sort=["_doc","tie_breaker_id"],size=args.size, q=args.q, body=query_body,_source=args.fields)
+    r = es.search(args.index, sort=["_doc"],size=args.size, q=args.q, body=query_body,_source=args.fields)
     display("Total docs:"+str(r["hits"]["total"]))
     cnt=0
     while True:
