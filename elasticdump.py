@@ -7,16 +7,20 @@ import time
 import simplejson as json
 from urlparse import urlparse
 from multiprocessing import Process, Queue, Event
+from requests.auth import HTTPBasicAuth
 
 #ES default to 24 hours max
 TIMEOUT = "1d"
+session=requests.Session()
+
 
 def ES21scroll(sid):
-    return json.loads(requests.post("{}/_search/scroll?scroll={}".format(args.host,TIMEOUT),data=sid,verify=False).text)
+    return json.loads(session.post("{}/_search/scroll?scroll={}".format(args.host,TIMEOUT),data=sid,verify=False,auth=(args.username, args.password)).text)
 
 def ESscroll(sid):
-    return json.loads(requests.post("{}/_search/scroll".format(args.host),
+    return json.loads(session.post("{}/_search/scroll".format(args.host),
                data=json.dumps({"scroll":TIMEOUT,"scroll_id":sid}),verify=False,
+               auth=(args.username, args.password),
                headers={"Content-Type":"application/json"}).text)
 
 
@@ -95,7 +99,7 @@ def dump(es,outq,alldone):
     while True:
         if 'hits' in r and len(r['hits']['hits'])==0:
             break
-        cnt+=len(r['hits']['hits'])
+       	cnt+=len(r['hits']['hits'])
         display("\rDumped {} documents".format(cnt))
         if sid!=r['_scroll_id']:
             f=open(url.netloc+'_'+args.index+'.session','w')
@@ -137,7 +141,7 @@ if __name__ == "__main__":
     group.add_argument('--url',help="Full ES query url to dump, http[s]://host:port/index/_search?q=...")
     group.add_argument('--host', help='ES host, http[s]://host:port')
     parser.add_argument('--index',help='Index name or index pattern, for example, logstash-* will work as well. Use _all for all indices')
-    parser.add_argument('--size',help='Scroll size',default=500)
+    parser.add_argument('--size',help='Scroll size',default=1000)
     parser.add_argument('--timeout',help='Read timeout. Wait time for long queries.',default=300, type=int)
     parser.add_argument('--fields', help='Filter output source fields. Separate keys with , (comma).')
     parser.add_argument('--username', help='Username to auth with')
