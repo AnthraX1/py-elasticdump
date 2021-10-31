@@ -4,7 +4,8 @@ import os
 import sys
 import time
 import simplejson as json
-from urllib.parse import urlparse
+import urllib3
+from urllib.parse import urlparse, quote_plus
 from multiprocessing import Process, Queue, Event
 from elasticsearch import Elasticsearch
 
@@ -13,6 +14,7 @@ TIMEOUT = "1d"
 session = requests.Session()
 COMPRESSION_HEADER = {"Accept-Encoding": "deflate, compress, gzip"}
 
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def ES21scroll(sid):
     headers = {"Content-Type": "application/json"}
@@ -39,13 +41,31 @@ def ESscroll(sid):
             data=json.dumps({"scroll": TIMEOUT, "scroll_id": sid}),
             verify=False,
             auth=(args.username, args.password),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         ).text
     )
 
 
-def display(msg):
-    sys.stderr.write(msg + "\n")
+def kibanaScroll(sid):
+    headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
+    scroll_url = "{}/api/console/proxy?method=POST&path={}".format(
+        args.host, quote_plus("/_search/scroll")
+    )
+    if args.C:
+        headers.update(COMPRESSION_HEADER)
+    return json.loads(
+        session.post(
+            scroll_url,
+            data=json.dumps({"scroll": TIMEOUT, "scroll_id": sid}),
+            verify=False,
+            auth=(args.username, args.password),
+            headers=headers,
+        ).text
+    )
+
+
+def display(msg, end="\n"):
+    print(msg, file=sys.stderr, end=end)
 
 
 def search_after_dump(es, outq, alldone):
@@ -70,9 +90,9 @@ def search_after_dump(es, outq, alldone):
         cnt += len(r["hits"]["hits"])
         for row in r["hits"]["hits"]:
             outq.put(row)
-        display("\rDumped {} documents".format(cnt))
+        display("Dumped {} documents".format(cnt), "\r")
         last_sort_id = r["hits"]["hits"][-1]["sort"][0]
-        display("\rlast sort id {}".format(last_sort_id))
+        display("\nlast sort id {}".format(last_sort_id), "\r")
         query_body = json.dumps({"search_after": [last_sort_id]})
         r = es.search(
             args.index,
@@ -112,7 +132,6 @@ def dump(es, outq, alldone):
                 _source=args.fields,
             )
         display("Total docs:" + str(r["hits"]["total"]))
-        total = r["hits"]["total"]
     else:
         fs = open(url.netloc + "_" + args.index + ".session", "r")
         sid = fs.readlines()[0].strip()
@@ -138,7 +157,7 @@ def dump(es, outq, alldone):
             f.close()
             sid = r["_scroll_id"]
         cnt += len(r["hits"]["hits"])
-        display("\rDumped {} documents".format(cnt))
+        display("\nDumped {} documents".format(cnt), "\r")
         for row in r["hits"]["hits"]:
             outq.put(row)
         if esversion < 2.1:
@@ -166,6 +185,50 @@ def getVersion(es):
     return float(vv)
 
 
+def dumpkibana(outq, alldone):
+    url = urlparse(args.host)
+    if not os.path.isfile(url.netloc + "_" + args.index + ".session"):
+        headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
+        if args.C:
+            headers.update(COMPRESSION_HEADER)
+        scroll_path = quote_plus("/{}/_search?size={}&sort=_doc&scroll={}".format(args.index, args.size, TIMEOUT))
+        if args.q:
+            scroll_path += quote_plus("&q={}".format(args.q))
+        r = session.post(
+            "{}/api/console/proxy?method=GET&path={}".format(args.host, scroll_path),
+            verify=False,
+            auth=(args.username, args.password),
+            headers=headers,
+        )
+        if r.status_code != 200:
+            display("Error:" + r.text)
+            exit(1)
+        r = json.loads(r.text)
+        if "_scroll_id" in r:
+            sid = r["_scroll_id"]
+            f = open(url.netloc + "_" + args.index + ".session", "w")
+            f.write(sid + "\n")
+            f.close()
+    else:
+        fs = open(url.netloc + "_" + args.index + ".session", "r")
+        sid = fs.readlines()[0].strip()
+        fs.close()
+        display("Continue session...")
+        r = kibanaScroll(sid)
+    display("Total docs:" + str(r["hits"]["total"]))
+    cnt = 0
+    while True:
+        if "hits" in r and len(r["hits"]["hits"]) == 0:
+            break
+        cnt += len(r["hits"]["hits"])
+        for row in r["hits"]["hits"]:
+            outq.put(row)
+        display("\nDumped {} documents".format(cnt), "\r")
+        r = kibanaScroll(sid)
+    alldone.set()
+    display("All done!")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Dump ES index with custom scan_id")
     group = parser.add_mutually_exclusive_group()
@@ -173,7 +236,7 @@ if __name__ == "__main__":
         "--url",
         help="Full ES query url to dump, http[s]://host:port/index/_search?q=...",
     )
-    group.add_argument("--host", help="ES host, http[s]://host:port")
+    group.add_argument("--host", help="ES OR Kibana host, http[s]://host:port")
     parser.add_argument(
         "--index",
         help="Index name or index pattern, for example, logstash-* will work as well. Use _all for all indices",
@@ -201,6 +264,9 @@ if __name__ == "__main__":
         type=bool,
         default=True,
     )
+    parser.add_argument(
+        "--kibana", help="Whether target is Kibana", action="store_true", default=False
+    )
     group1 = parser.add_mutually_exclusive_group()
     group1.add_argument("--query", help="Query string in Elasticsearch DSL format.")
     group1.add_argument("--q", help="Query string in Lucene query format.")
@@ -211,10 +277,26 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    if args.url is None and (args.host or args.index) is None:
-        exit("must provide url or host and index name!")
 
-    if args.url != None:
+    outq = Queue(maxsize=50000)
+    alldone = Event()
+
+    if args.url is None and (args.host or args.index) is None:
+        display("must provide url or host and index name!")
+        exit(1)
+
+    if args.kibana:
+        dumpproc = Process(target=dumpkibana, args=(outq, alldone))
+        dumpproc.daemon = True
+        dumpproc.start()
+        while not alldone.is_set() or outq.qsize() > 0:
+            try:
+                print(json.dumps(outq.get(block=False)))
+            except:
+                time.sleep(0.1)
+        exit(0)
+
+    if args.url is not None:
         url = urlparse(args.url)
         args.host = "{}://{}".format(url.scheme, url.netloc)
         args.index = url.path.split("/")[1]
@@ -254,8 +336,7 @@ if __name__ == "__main__":
                 request_timeout=5,
                 timeout=args.timeout,
             )
-    outq = Queue(maxsize=50000)
-    alldone = Event()
+
     if args.search_after is None:
         dumpproc = Process(target=dump, args=(es, outq, alldone))
     else:
