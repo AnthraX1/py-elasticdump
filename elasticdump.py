@@ -16,6 +16,7 @@ COMPRESSION_HEADER = {"Accept-Encoding": "deflate, compress, gzip"}
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+
 def ES21scroll(sid):
     headers = {"Content-Type": "application/json"}
     if args.C:
@@ -157,7 +158,7 @@ def dump(es, outq, alldone):
             f.close()
             sid = r["_scroll_id"]
         cnt += len(r["hits"]["hits"])
-        display("\nDumped {} documents".format(cnt), "\r")
+        display("Dumped {} documents".format(cnt), "\r")
         for row in r["hits"]["hits"]:
             outq.put(row)
         if esversion < 2.1:
@@ -194,6 +195,8 @@ def dumpkibana(outq, alldone):
         scroll_path = quote_plus("/{}/_search?size={}&sort=_doc&scroll={}".format(args.index, args.size, TIMEOUT))
         if args.q:
             scroll_path += quote_plus("&q={}".format(args.q))
+        if args.fields:
+            scroll_path += quote_plus("&_source={}".format(args.fields))
         r = session.post(
             "{}/api/console/proxy?method=GET&path={}".format(args.host, scroll_path),
             verify=False,
@@ -223,7 +226,7 @@ def dumpkibana(outq, alldone):
         cnt += len(r["hits"]["hits"])
         for row in r["hits"]["hits"]:
             outq.put(row)
-        display("\nDumped {} documents".format(cnt), "\r")
+        display("Dumped {} documents".format(cnt), "\r")
         r = kibanaScroll(sid)
     alldone.set()
     display("All done!")
