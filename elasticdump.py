@@ -110,7 +110,8 @@ def search_after_dump(es, outq, alldone):
 
 def dump(es, outq, alldone):
     esversion = getVersion(es)
-    if not os.path.isfile(url.netloc + "_" + args.index + ".session"):
+    session_file_name = "{}_{}_{}.sesssion".format(url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16])
+    if not os.path.isfile(session_file_name):
         if esversion < 2.1:
             r = es.search(
                 args.index,
@@ -135,7 +136,7 @@ def dump(es, outq, alldone):
             )
         display("Total docs:" + str(r["hits"]["total"]))
     else:
-        fs = open(url.netloc + "_" + args.index + ".session", "r")
+        fs = open(session_file_name, "r")
         sid = fs.readlines()[0].strip()
         fs.close()
         if esversion < 2.1:
@@ -146,15 +147,7 @@ def dump(es, outq, alldone):
 
     if "_scroll_id" in r:
         sid = r["_scroll_id"]
-        f = open(
-            url.netloc
-            + "_"
-            + args.index
-            + "_"
-            + hashlib.md5(args.q).hexdigest()[0:16]
-            + ".session",
-            "w",
-        )
+        f = open(session_file_name, "w",)
         f.write(sid + "\n")
         f.close()
     cnt = 0
@@ -162,14 +155,7 @@ def dump(es, outq, alldone):
         if "hits" in r and len(r["hits"]["hits"]) == 0:
             break
         if sid != r["_scroll_id"]:
-            f = open(
-                url.netloc
-                + "_"
-                + args.index
-                + hashlib.md5(args.q).hexdigest()[0:16]
-                + ".session",
-                "w",
-            )
+            f = open(session_file_name, "w")
             f.write(sid + "\n")
             f.close()
             sid = r["_scroll_id"]
@@ -204,7 +190,8 @@ def getVersion(es):
 
 def dumpkibana(outq, alldone):
     url = urlparse(args.host)
-    if not os.path.isfile(url.netloc + "_" + args.index + ".session"):
+    session_file_name = "{}_{}_{}.sesssion".format(url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16])
+    if not os.path.isfile(session_file_name):
         headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
         if args.C:
             headers.update(COMPRESSION_HEADER)
@@ -229,25 +216,11 @@ def dumpkibana(outq, alldone):
         r = json.loads(r.text)
         if "_scroll_id" in r:
             sid = r["_scroll_id"]
-            f = open(
-                url.netloc
-                + "_"
-                + args.index
-                + hashlib.md5(args.q).hexdigest()[0:16]
-                + ".session",
-                "w",
-            )
+            f = open(session_file_name, "w")
             f.write(sid + "\n")
             f.close()
     else:
-        fs = open(
-            url.netloc
-            + "_"
-            + args.index
-            + hashlib.md5(args.q).hexdigest()[0:16]
-            + ".session",
-            "r",
-        )
+        fs = open(session_file_name, "r")
         sid = fs.readlines()[0].strip()
         fs.close()
         display("Continue session...")
@@ -257,6 +230,11 @@ def dumpkibana(outq, alldone):
     while True:
         if "hits" in r and len(r["hits"]["hits"]) == 0:
             break
+        if sid != r["_scroll_id"]:
+            f = open(session_file_name, "w")
+            f.write(sid + "\n")
+            f.close()
+            sid = r["_scroll_id"]
         cnt += len(r["hits"]["hits"])
         for row in r["hits"]["hits"]:
             outq.put(row)
