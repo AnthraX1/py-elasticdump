@@ -5,6 +5,7 @@ import sys
 import time
 import simplejson as json
 import urllib3
+import hashlib
 from urllib.parse import urlparse, quote_plus
 from multiprocessing import Process, Queue, Event
 from elasticsearch import Elasticsearch
@@ -145,7 +146,15 @@ def dump(es, outq, alldone):
 
     if "_scroll_id" in r:
         sid = r["_scroll_id"]
-        f = open(url.netloc + "_" + args.index + ".session", "w")
+        f = open(
+            url.netloc
+            + "_"
+            + args.index
+            + "_"
+            + hashlib.md5(args.q).hexdigest()[0:16]
+            + ".session",
+            "w",
+        )
         f.write(sid + "\n")
         f.close()
     cnt = 0
@@ -153,7 +162,14 @@ def dump(es, outq, alldone):
         if "hits" in r and len(r["hits"]["hits"]) == 0:
             break
         if sid != r["_scroll_id"]:
-            f = open(url.netloc + "_" + args.index + ".session", "w")
+            f = open(
+                url.netloc
+                + "_"
+                + args.index
+                + hashlib.md5(args.q).hexdigest()[0:16]
+                + ".session",
+                "w",
+            )
             f.write(sid + "\n")
             f.close()
             sid = r["_scroll_id"]
@@ -192,7 +208,11 @@ def dumpkibana(outq, alldone):
         headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
         if args.C:
             headers.update(COMPRESSION_HEADER)
-        scroll_path = quote_plus("/{}/_search?size={}&sort=_doc&scroll={}".format(args.index, args.size, TIMEOUT))
+        scroll_path = quote_plus(
+            "/{}/_search?size={}&sort=_doc&scroll={}".format(
+                args.index, args.size, TIMEOUT
+            )
+        )
         if args.q:
             scroll_path += quote_plus("&q={}".format(args.q))
         if args.fields:
@@ -209,11 +229,25 @@ def dumpkibana(outq, alldone):
         r = json.loads(r.text)
         if "_scroll_id" in r:
             sid = r["_scroll_id"]
-            f = open(url.netloc + "_" + args.index + ".session", "w")
+            f = open(
+                url.netloc
+                + "_"
+                + args.index
+                + hashlib.md5(args.q).hexdigest()[0:16]
+                + ".session",
+                "w",
+            )
             f.write(sid + "\n")
             f.close()
     else:
-        fs = open(url.netloc + "_" + args.index + ".session", "r")
+        fs = open(
+            url.netloc
+            + "_"
+            + args.index
+            + hashlib.md5(args.q).hexdigest()[0:16]
+            + ".session",
+            "r",
+        )
         sid = fs.readlines()[0].strip()
         fs.close()
         display("Continue session...")
