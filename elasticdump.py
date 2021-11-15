@@ -110,7 +110,11 @@ def search_after_dump(es, outq, alldone):
 
 def dump(es, outq, alldone):
     esversion = getVersion(es)
-    session_file_name = "{}_{}_{}.sesssion".format(url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16])
+    session_file_name = "{}_{}.sesssion".format(url.netloc, args.index)
+    if args.q:
+        session_file_name = "{}_{}_{}.sesssion".format(
+            url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16]
+        )
     if not os.path.isfile(session_file_name):
         if esversion < 2.1:
             r = es.search(
@@ -147,7 +151,10 @@ def dump(es, outq, alldone):
 
     if "_scroll_id" in r:
         sid = r["_scroll_id"]
-        f = open(session_file_name, "w",)
+        f = open(
+            session_file_name,
+            "w",
+        )
         f.write(sid + "\n")
         f.close()
     cnt = 0
@@ -190,7 +197,11 @@ def getVersion(es):
 
 def dumpkibana(outq, alldone):
     url = urlparse(args.host)
-    session_file_name = "{}_{}_{}.sesssion".format(url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16])
+    session_file_name = "{}_{}.sesssion".format(url.netloc, args.index)
+    if args.q:
+        session_file_name = "{}_{}_{}.sesssion".format(
+            url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16]
+        )
     if not os.path.isfile(session_file_name):
         headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
         if args.C:
