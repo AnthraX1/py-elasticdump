@@ -110,9 +110,9 @@ def search_after_dump(es, outq, alldone):
 
 def dump(es, outq, alldone):
     esversion = getVersion(es)
-    session_file_name = "{}_{}.sesssion".format(url.netloc, args.index)
+    session_file_name = "{}_{}.session".format(url.netloc, args.index)
     if args.q:
-        session_file_name = "{}_{}_{}.sesssion".format(
+        session_file_name = "{}_{}_{}.session".format(
             url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16]
         )
     if not os.path.isfile(session_file_name):
@@ -197,9 +197,9 @@ def getVersion(es):
 
 def dumpkibana(outq, alldone):
     url = urlparse(args.host)
-    session_file_name = "{}_{}.sesssion".format(url.netloc, args.index)
+    session_file_name = "{}_{}.session".format(url.netloc, args.index)
     if args.q:
-        session_file_name = "{}_{}_{}.sesssion".format(
+        session_file_name = "{}_{}_{}.session".format(
             url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16]
         )
     if not os.path.isfile(session_file_name):
