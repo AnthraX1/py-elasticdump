@@ -55,6 +55,19 @@ def getVersion():
     return float(vv)
 
 
+def getVersionKibana():
+    headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
+    r = session.post(
+        "{}/api/console/proxy?method=GET&path={}".format(args.host, quote_plus("/")),
+        verify=False,
+        headers=headers,
+    )
+    clusterinfo = r.json()
+    varr = clusterinfo["version"]["number"].split(".")
+    vv = ".".join(varr[0:-1])
+    return float(vv)
+
+
 def kibanaScroll(sid, session):
     headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
     scroll_url = "{}/api/console/proxy?method=POST&path={}".format(
@@ -130,7 +143,10 @@ def search_after_dump(outq, alldone):
 
 def dump(outq, alldone, total, slice_id=None, slice_max=None):
     session = requests.Session()
-    esversion = getVersion()
+    if args.kibana:
+        esversion = getVersionKibana()
+    else:
+        esversion = getVersion()
     session_file_name = "{}_{}".format(url.netloc, args.index)
     query_body = {}
     if slice_id is not None and slice_max is not None:
@@ -148,7 +164,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         headers.update(COMPRESSION_HEADER)
     if not os.path.isfile(session_file_name):
         if args.kibana:
-            headers["kbn-xsrf"] = True
+            headers["kbn-xsrf"] = "true"
             scroll_path = quote_plus(
                 "/{}/_search?size={}&sort=_doc&scroll={}".format(
                     args.index, args.size, TIMEOUT
@@ -335,7 +351,10 @@ if __name__ == "__main__":
         url = urlparse(args.host)
 
     if args.slices:
-        version = getVersion()
+        if args.kibana:
+            version = getVersionKibana()
+        else:
+            version = getVersion()
         if version <= 2.1:
             display("Sliced scroll is not supported in ES 2.1 or below")
             exit(1)
