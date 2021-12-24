@@ -368,9 +368,10 @@ if __name__ == "__main__":
         dumpproc.daemon = True
         dumpproc.start()
 
-    for alldone in alldone_flags:
-        while not alldone.is_set() or outq.qsize() > 0:
-            try:
-                print(json.dumps(outq.get(block=False)))
-            except:
-                time.sleep(0.1)
+    while True:
+        try:
+            print(json.dumps(outq.get(block=False)))
+        except:
+            all([alldone.is_set() for alldone in alldone_flags]) and outq.qsize() == 0:
+                break
+            time.sleep(0.1)
