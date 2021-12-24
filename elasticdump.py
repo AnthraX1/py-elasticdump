@@ -372,6 +372,9 @@ if __name__ == "__main__":
         try:
             print(json.dumps(outq.get(block=False)))
         except:
-            all([alldone.is_set() for alldone in alldone_flags]) and outq.qsize() == 0:
+            if (
+                all([alldone.is_set() for alldone in alldone_flags])
+                and outq.qsize() == 0
+            ):
                 break
             time.sleep(0.1)
