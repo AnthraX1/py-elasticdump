@@ -3,12 +3,11 @@ import requests
 import os
 import sys
 import time
-import simplejson as json
+import orjson as json
 import urllib3
 import hashlib
 from urllib.parse import urlparse, quote_plus
-from multiprocessing import Process, Queue, Event
-from elasticsearch import Elasticsearch
+from multiprocessing import Process, Queue, Value, Event
 
 # ES default to 24 hours max
 TIMEOUT = "1d"
@@ -33,7 +32,7 @@ def ES21scroll(sid):
     )
 
 
-def ESscroll(sid):
+def ESscroll(sid, session):
     headers = {"Content-Type": "application/json"}
     if args.C:
         headers.update(COMPRESSION_HEADER)
@@ -48,7 +47,15 @@ def ESscroll(sid):
     )
 
 
-def kibanaScroll(sid):
+def getVersion():
+    r = session.get("{}/".format(args.host), verify=False)
+    clusterinfo = r.json()
+    varr = clusterinfo["version"]["number"].split(".")
+    vv = ".".join(varr[0:-1])
+    return float(vv)
+
+
+def kibanaScroll(sid, session):
     headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
     scroll_url = "{}/api/console/proxy?method=POST&path={}".format(
         args.host, quote_plus("/_search/scroll")
@@ -70,20 +77,34 @@ def display(msg, end="\n"):
     print(msg, file=sys.stderr, end=end)
 
 
-def search_after_dump(es, outq, alldone):
-    esversion = getVersion(es)
-    if esversion < 2.1 and args.search_after != None:
+def get_index_shard_count():
+    r = session.get(
+        "{}/_cat/shards/{}?format=json".format(args.host, args.index), verify=False
+    )
+    return len(r.json())
+
+
+def search_after_dump(outq, alldone):
+    esversion = getVersion()
+    if esversion < 2.1:
         alldone.set()
         exit("search_after is not supported before ES version 2.1")
-    query_body = json.dumps({"search_after": [args.search_after]})
-    r = es.search(
-        args.index,
-        sort=["_doc"],
-        size=args.size,
-        q=args.q,
-        body=query_body,
-        _source=args.fields,
+    headers = {"Content-Type": "application/json"}
+    if args.C:
+        headers.update(COMPRESSION_HEADER)
+    query_body = json.dumps({"search_after": [args.search_after], "sort": ["_doc"]})
+    params = {"size": args.size}
+    if args.q:
+        params["q"] = args.q
+    if args.fields:
+        params["_source"] = args.fields
+    rt = session.get(
+        "{}/{}/_search".format(args.host, args.index),
+        headers=headers,
+        params=params,
+        data=query_body,
     )
+    r = json.loads(rt.text)
     display("Total docs:" + str(r["hits"]["total"]))
     cnt = 0
     while True:
@@ -96,57 +117,94 @@ def search_after_dump(es, outq, alldone):
         last_sort_id = r["hits"]["hits"][-1]["sort"][0]
         display("\nlast sort id {}".format(last_sort_id), "\r")
         query_body = json.dumps({"search_after": [last_sort_id]})
-        r = es.search(
-            args.index,
-            sort=["_doc"],
-            size=args.size,
-            q=args.q,
-            body=query_body,
-            _source=args.fields,
+        rt = session.get(
+            "{}/{}/_search".format(args.host, args.index),
+            headers=headers,
+            params=params,
+            data=query_body,
         )
+        r = json.loads(rt.text)
     alldone.set()
-    display("All done!")
+    display("All done!", "\n")
 
 
-def dump(es, outq, alldone):
-    esversion = getVersion(es)
-    session_file_name = "{}_{}.session".format(url.netloc, args.index)
+def dump(outq, alldone, total, slice_id=None, slice_max=None):
+    session = requests.Session()
+    esversion = getVersion()
+    session_file_name = "{}_{}".format(url.netloc, args.index)
+    query_body = {}
+    if slice_id is not None and slice_max is not None:
+        session_file_name += "_{}_{}".format(slice_id, slice_max)
+        query_body["slice"] = {"id": slice_id, "max": slice_max}
     if args.q:
-        session_file_name = "{}_{}_{}.session".format(
-            url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16]
+        session_file_name += "_{}".format(
+            hashlib.md5(args.q.encode()).hexdigest()[0:16]
         )
+    if args.query:
+        query_body["query"] = json.loads(args.query)
+    session_file_name += ".session"
+    headers = {"Content-Type": "application/json"}
+    if args.C:
+        headers.update(COMPRESSION_HEADER)
     if not os.path.isfile(session_file_name):
-        if esversion < 2.1:
-            r = es.search(
-                args.index,
-                search_type="scan",
-                size=args.size,
-                scroll=TIMEOUT,
-                q=args.q,
-                body=args.query,
-                _source=args.fields,
+        if args.kibana:
+            headers["kbn-xsrf"] = True
+            scroll_path = quote_plus(
+                "/{}/_search?size={}&sort=_doc&scroll={}".format(
+                    args.index, args.size, TIMEOUT
+                )
             )
-            if "_scroll_id" in r:
-                r = ES21scroll(r["_scroll_id"])
+            if args.q:
+                scroll_path += quote_plus("&q={}".format(args.q))
+            if args.fields:
+                scroll_path += quote_plus("&_source={}".format(args.fields))
+            query_body_json = json.dumps(query_body)
+            rt = session.post(
+                "{}/api/console/proxy?method=GET&path={}".format(
+                    args.host, scroll_path
+                ),
+                verify=False,
+                auth=(args.username, args.password),
+                headers=headers,
+                data=query_body_json,
+            )
+            if rt.status_code != 200:
+                display("Error:" + rt.text)
+                exit(1)
         else:
-            r = es.search(
-                args.index,
-                sort=["_doc"],
-                size=args.size,
-                scroll=TIMEOUT,
-                q=args.q,
-                body=args.query,
-                _source=args.fields,
+            params = {"size": args.size}
+            if args.q:
+                params["q"] = args.q
+            if args.fields:
+                params["_source"] = args.fields
+            params["scroll"] = TIMEOUT
+            if esversion <= 2.1:
+                params["search_type"] = "scan"
+            else:
+                params["sort"] = ["_doc"]
+            query_body_json = json.dumps(query_body)
+            rt = session.get(
+                "{}/{}/_search".format(args.host, args.index),
+                verify=False,
+                headers=headers,
+                auth=(args.username, args.password),
+                params=params,
+                data=query_body_json,
             )
-        display("Total docs:" + str(r["hits"]["total"]))
+        r = json.loads(rt.text)
+        if esversion <= 2.1 and "_scroll_id" in r:
+            r = ES21scroll(r["_scroll_id"])
+        display("Total docs (or in this slice):" + str(r["hits"]["total"]), "\n")
     else:
         fs = open(session_file_name, "r")
         sid = fs.readlines()[0].strip()
         fs.close()
         if esversion < 2.1:
             r = ES21scroll(sid)
+        elif args.kibana:
+            r = kibanaScroll(sid, session)
         else:
-            r = ESscroll(sid)
+            r = ESscroll(sid, session)
         display("Continue session...")
 
     if "_scroll_id" in r:
@@ -157,7 +215,7 @@ def dump(es, outq, alldone):
         )
         f.write(sid + "\n")
         f.close()
-    cnt = 0
+
     while True:
         if "hits" in r and len(r["hits"]["hits"]) == 0:
             break
@@ -166,8 +224,9 @@ def dump(es, outq, alldone):
             f.write(sid + "\n")
             f.close()
             sid = r["_scroll_id"]
-        cnt += len(r["hits"]["hits"])
-        display("Dumped {} documents".format(cnt), "\r")
+        with total.get_lock():
+            total.value += len(r["hits"]["hits"])
+        display("Dumped {} documents".format(total.value), "\r")
         for row in r["hits"]["hits"]:
             outq.put(row)
         if esversion < 2.1:
@@ -177,80 +236,20 @@ def dump(es, outq, alldone):
                 display(str(e))
                 display(json.dumps(r))
                 continue
-        else:
+        elif args.kibana:
             try:
-                r = ESscroll(sid)
+                r = kibanaScroll(sid, session)
             except Exception as e:
                 display(str(e))
                 display(json.dumps(r))
                 continue
-    alldone.set()
-    display("All done!")
-
-
-def getVersion(es):
-    clusterinfo = es.info()
-    varr = clusterinfo["version"]["number"].split(".")
-    vv = ".".join(varr[0:-1])
-    return float(vv)
-
-
-def dumpkibana(outq, alldone):
-    url = urlparse(args.host)
-    session_file_name = "{}_{}.session".format(url.netloc, args.index)
-    if args.q:
-        session_file_name = "{}_{}_{}.session".format(
-            url.netloc, args.index, hashlib.md5(args.q.encode()).hexdigest()[0:16]
-        )
-    if not os.path.isfile(session_file_name):
-        headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
-        if args.C:
-            headers.update(COMPRESSION_HEADER)
-        scroll_path = quote_plus(
-            "/{}/_search?size={}&sort=_doc&scroll={}".format(
-                args.index, args.size, TIMEOUT
-            )
-        )
-        if args.q:
-            scroll_path += quote_plus("&q={}".format(args.q))
-        if args.fields:
-            scroll_path += quote_plus("&_source={}".format(args.fields))
-        r = session.post(
-            "{}/api/console/proxy?method=GET&path={}".format(args.host, scroll_path),
-            verify=False,
-            auth=(args.username, args.password),
-            headers=headers,
-        )
-        if r.status_code != 200:
-            display("Error:" + r.text)
-            exit(1)
-        r = json.loads(r.text)
-        if "_scroll_id" in r:
-            sid = r["_scroll_id"]
-            f = open(session_file_name, "w")
-            f.write(sid + "\n")
-            f.close()
-    else:
-        fs = open(session_file_name, "r")
-        sid = fs.readlines()[0].strip()
-        fs.close()
-        display("Continue session...")
-        r = kibanaScroll(sid)
-    display("Total docs:" + str(r["hits"]["total"]))
-    cnt = 0
-    while True:
-        if "hits" in r and len(r["hits"]["hits"]) == 0:
-            break
-        if sid != r["_scroll_id"]:
-            f = open(session_file_name, "w")
-            f.write(sid + "\n")
-            f.close()
-            sid = r["_scroll_id"]
-        cnt += len(r["hits"]["hits"])
-        for row in r["hits"]["hits"]:
-            outq.put(row)
-        display("Dumped {} documents".format(cnt), "\r")
-        r = kibanaScroll(sid)
+        else:
+            try:
+                r = ESscroll(sid, session)
+            except Exception as e:
+                display(str(e))
+                display(json.dumps(r))
+                continue
     alldone.set()
     display("All done!")
 
@@ -280,11 +279,6 @@ if __name__ == "__main__":
     parser.add_argument("--username", help="Username to auth with")
     parser.add_argument("--password", help="Password to auth with")
     parser.add_argument(
-        "--search_after",
-        help="Recover dump using search_after with sort by _doc",
-        type=int,
-    )
-    parser.add_argument(
         "-C",
         help="Enable HTTP compression. Might not work on some older ES versions.",
         type=bool,
@@ -294,33 +288,36 @@ if __name__ == "__main__":
         "--kibana", help="Whether target is Kibana", action="store_true", default=False
     )
     group1 = parser.add_mutually_exclusive_group()
-    group1.add_argument("--query", help="Query string in Elasticsearch DSL format.")
+    group1.add_argument(
+        "--query",
+        help="Query string in Elasticsearch DSL format. Include parts inside \{\} only.",
+    )
     group1.add_argument("--q", help="Query string in Lucene query format.")
 
     parser.add_argument(
         "--scroll_jump_id",
         help="When scroll session is expired, use this to jump to last doc _id. (Must delete existing .session file)",
     )
-
+    group2 = parser.add_mutually_exclusive_group()
+    group2.add_argument(
+        "--slices",
+        help="Number of slices to use. Default to None (no slice). This uses sliced scroll in ES.",
+        type=int,
+    )
+    group2.add_argument(
+        "--search_after",
+        help="Recover dump using search_after with sort by _doc",
+        type=int,
+    )
+    total = Value("i", 0)
     args = parser.parse_args()
 
-    outq = Queue(maxsize=50000)
-    alldone = Event()
+    outq = Queue(maxsize=100000)
 
+    alldone_flags = []
     if args.url is None and (args.host or args.index) is None:
         display("must provide url or host and index name!")
         exit(1)
-
-    if args.kibana:
-        dumpproc = Process(target=dumpkibana, args=(outq, alldone))
-        dumpproc.daemon = True
-        dumpproc.start()
-        while not alldone.is_set() or outq.qsize() > 0:
-            try:
-                print(json.dumps(outq.get(block=False)))
-            except:
-                time.sleep(0.1)
-        exit(0)
 
     if args.url is not None:
         url = urlparse(args.url)
@@ -336,41 +333,44 @@ if __name__ == "__main__":
                     args.fields = qa[1]
     else:
         url = urlparse(args.host)
-    if args.username and args.password:
-        es = Elasticsearch(
-            url.netloc,
-            request_timeout=5,
-            timeout=args.timeout,
-            http_auth=(args.username, args.password),
-        )
-        if url.scheme == "https":
-            es = Elasticsearch(
-                url.netloc,
-                use_ssl=True,
-                verify_certs=False,
-                request_timeout=5,
-                timeout=args.timeout,
-                http_auth=(args.username, args.password),
-            )
-    else:
-        es = Elasticsearch(url.netloc, request_timeout=5, timeout=args.timeout)
-        if url.scheme == "https":
-            es = Elasticsearch(
-                url.netloc,
-                use_ssl=True,
-                verify_certs=False,
-                request_timeout=5,
-                timeout=args.timeout,
-            )
 
-    if args.search_after is None:
-        dumpproc = Process(target=dump, args=(es, outq, alldone))
+    if args.slices:
+        version = getVersion()
+        if version <= 2.1:
+            display("Sliced scroll is not supported in ES 2.1 or below")
+            exit(1)
+        shards = get_index_shard_count()
+        display("Total shards: {}".format(shards))
+        if args.slices > shards:
+            display(
+                "Slice count is greater than total shards. Setting slice to total shards."
+            )
+            args.slices = shards
+        for slice_id in range(args.slices):
+            alldone = Event()
+            alldone_flags.append(alldone)
+            dumpproc = Process(
+                target=dump,
+                args=(outq, alldone, total, slice_id, args.slices),
+            )
+            dumpproc.daemon = True
+            dumpproc.start()
+    elif args.search_after:
+        alldone_flags.append(Event())
+        dumpproc = Process(target=search_after_dump, args=(outq, alldone_flags[0]))
+        dumpproc.daemon = True
+        dumpproc.start()
     else:
-        dumpproc = Process(target=search_after_dump, args=(es, outq, alldone))
-    dumpproc.daemon = True
-    dumpproc.start()
-    while not alldone.is_set() or outq.qsize() > 0:
-        try:
-            print(json.dumps(outq.get(block=False)))
-        except:
-            time.sleep(0.1)
+        alldone_flags.append(Event())
+        dumpproc = Process(
+            target=dump, args=(outq, alldone_flags[0], total, None, None)
+        )
+        dumpproc.daemon = True
+        dumpproc.start()
+
+    for alldone in alldone_flags:
+        while not alldone.is_set() or outq.qsize() > 0:
+            try:
+                print(json.dumps(outq.get(block=False)))
+            except:
+                time.sleep(0.1)
