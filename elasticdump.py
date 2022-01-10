@@ -48,7 +48,7 @@ def ESscroll(sid, session):
 
 
 def getVersion():
-    r = session.get("{}/".format(args.host), verify=False)
+    r = requests.get("{}/".format(args.host), verify=False)
     clusterinfo = r.json()
     varr = clusterinfo["version"]["number"].split(".")
     vv = ".".join(varr[0:-1])
@@ -57,7 +57,7 @@ def getVersion():
 
 def getVersionKibana():
     headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
-    r = session.post(
+    r = requests.post(
         "{}/api/console/proxy?method=GET&path={}".format(args.host, quote_plus("/")),
         verify=False,
         headers=headers,
