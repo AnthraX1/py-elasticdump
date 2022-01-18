@@ -97,6 +97,17 @@ def get_index_shard_count():
     return len(r.json())
 
 
+def get_kibana_index_shard_count():
+    headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
+    url = "{}/api/console/proxy?method=POST&path={}".format(
+        args.host, quote_plus("_cat/shards/{}?format=json".format(args.index))
+    )
+    r = session.post(
+        url, verify=False, auth=(args.username, args.password), headers=headers
+    )
+    return len(r.json())
+
+
 def search_after_dump(outq, alldone):
     esversion = getVersion()
     if esversion < 2.1:
@@ -353,12 +364,13 @@ if __name__ == "__main__":
     if args.slices:
         if args.kibana:
             version = getVersionKibana()
+            shards = get_kibana_index_shard_count()
         else:
             version = getVersion()
+            shards = get_index_shard_count()
         if version <= 2.1:
             display("Sliced scroll is not supported in ES 2.1 or below")
             exit(1)
-        shards = get_index_shard_count()
         display("Total shards: {}".format(shards))
         if args.slices > shards:
             display(
