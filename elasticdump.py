@@ -187,7 +187,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 scroll_path += quote_plus("&_source={}".format(args.fields))
             query_body_json = json.dumps(query_body)
             rt = session.post(
-                "{}/api/console/proxy?method=GET&path={}".format(
+                "{}/api/console/proxy?method=POST&path={}".format(
                     args.host, scroll_path
                 ),
                 verify=False,
