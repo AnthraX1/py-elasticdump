@@ -99,7 +99,7 @@ def get_index_shard_count():
 
 def get_kibana_index_shard_count():
     headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
-    url = "{}/api/console/proxy?method=POST&path={}".format(
+    url = "{}/api/console/proxy?method=GET&path={}".format(
         args.host, quote_plus("_cat/shards/{}?format=json".format(args.index))
     )
     r = session.post(
@@ -246,7 +246,10 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
     while True:
         if "hits" in r and len(r["hits"]["hits"]) == 0:
             break
-        if sid != r["_scroll_id"]:
+        if "hits" not in r:
+            display("Missing hits error: {}".format(r))
+            break
+        if r.get("_scroll_id") is not None and sid != r["_scroll_id"]:
             f = open(session_file_name, "w")
             f.write(sid + "\n")
             f.close()
