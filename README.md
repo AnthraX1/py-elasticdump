@@ -1,7 +1,7 @@
 # py-elasticdump
 
 
-`
+```
 usage: elasticdump.py [-h] [--url URL | --host HOST] [--index INDEX] [--size SIZE] [--timeout TIMEOUT] [--fields FIELDS]
                       [--username USERNAME] [--password PASSWORD] [-C C] [--kibana] [--query QUERY | --q Q]
                       [--scroll_jump_id SCROLL_JUMP_ID] [--slices SLICES | --search_after SEARCH_AFTER]
@@ -27,4 +27,4 @@ optional arguments:
   --slices SLICES       Number of slices to use. Default to None (no slice). This uses sliced scroll in ES.
   --search_after SEARCH_AFTER
                         Recover dump using search_after with sort by _doc
-`
+```
