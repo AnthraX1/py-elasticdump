@@ -6,6 +6,7 @@ import time
 import orjson as json
 import urllib3
 import hashlib
+from queue import Empty
 from urllib.parse import urlparse, quote_plus
 from multiprocessing import Process, Queue, Value, Event
 
@@ -264,21 +265,21 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 r = ES21scroll(sid)
             except Exception as e:
                 display(str(e))
-                display(json.dumps(r))
+                display(json.dumps(r).decode("utf-8"))
                 continue
         elif args.kibana:
             try:
                 r = kibanaScroll(sid, session)
             except Exception as e:
                 display(str(e))
-                display(json.dumps(r))
+                display(json.dumps(r).decode("utf-8"))
                 continue
         else:
             try:
                 r = ESscroll(sid, session)
             except Exception as e:
                 display(str(e))
-                display(json.dumps(r))
+                display(json.dumps(r).decode("utf-8"))
                 continue
     alldone.set()
     display("All done!")
@@ -342,7 +343,7 @@ if __name__ == "__main__":
     total = Value("i", 0)
     args = parser.parse_args()
 
-    outq = Queue(maxsize=100000)
+    outq = Queue(maxsize=500000)
 
     alldone_flags = []
     if args.url is None and (args.host or args.index) is None:
@@ -404,8 +405,8 @@ if __name__ == "__main__":
 
     while True:
         try:
-            print(json.dumps(outq.get(block=False)))
-        except:
+            print(json.dumps(outq.get(block=False)).decode("utf-8"))
+        except Empty:
             if (
                 all([alldone.is_set() for alldone in alldone_flags])
                 and outq.qsize() == 0
