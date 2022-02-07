@@ -343,7 +343,7 @@ if __name__ == "__main__":
     total = Value("i", 0)
     args = parser.parse_args()
 
-    outq = Queue(maxsize=500000)
+    outq = Queue(maxsize=100000)
 
     alldone_flags = []
     if args.url is None and (args.host or args.index) is None:
