@@ -141,7 +141,7 @@ def search_after_dump(outq, alldone):
         display("Dumped {} documents".format(cnt), "\r")
         last_sort_id = r["hits"]["hits"][-1]["sort"][0]
         display("\nlast sort id {}".format(last_sort_id), "\r")
-        query_body = json.dumps({"search_after": [last_sort_id]})
+        query_body = json.dumps({"search_after": [last_sort_id], "sort": ["_doc"]})
         rt = session.get(
             "{}/{}/_search".format(args.host, args.index),
             headers=headers,
