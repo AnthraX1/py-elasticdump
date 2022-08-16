@@ -62,6 +62,7 @@ def getVersionKibana():
         "{}/api/console/proxy?method=GET&path={}".format(args.host, quote_plus("/")),
         verify=False,
         headers=headers,
+        auth=(args.username, args.password),
     )
     clusterinfo = r.json()
     varr = clusterinfo["version"]["number"].split(".")
