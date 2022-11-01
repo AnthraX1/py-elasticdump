@@ -28,7 +28,7 @@ def ES21scroll(sid):
             data=sid,
             verify=False,
             headers=headers,
-            auth=(args.username, args.password),
+            auth=(args.username, args.password) if args.password else None,
         ).text
     )
 
@@ -46,7 +46,7 @@ def ESscroll(sid, session):
             url,
             data=json.dumps({"scroll": TIMEOUT, "scroll_id": sid}),
             verify=False,
-            auth=(args.username, args.password),
+            auth=(args.username, args.password) if args.password else None,
             headers=headers,
         ).text
     )
@@ -69,7 +69,7 @@ def getVersionKibana():
         verify=False,
         headers=headers,
         allow_redirects=args.follow_redirect,
-        auth=(args.username, args.password),
+        auth=(args.username, args.password) if args.password else None,
     )
     clusterinfo = r.json()
     varr = clusterinfo["version"]["number"].split(".")
@@ -89,7 +89,7 @@ def kibanaScroll(sid, session):
             scroll_url,
             data=json.dumps({"scroll": TIMEOUT, "scroll_id": sid}),
             verify=False,
-            auth=(args.username, args.password),
+            auth=(args.username, args.password) if args.password else None,
             headers=headers,
         ).text
     )
@@ -112,7 +112,9 @@ def get_kibana_index_shard_count():
         args.host, quote_plus("_cat/shards/{}?format=json".format(args.index))
     )
     r = session.post(
-        url, verify=False, auth=(args.username, args.password), headers=headers
+        url, verify=False,
+        auth=(args.username, args.password) if args.password else None,
+        headers=headers
     )
     return len(r.json())
 
@@ -202,7 +204,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                     args.host, scroll_path
                 ),
                 verify=False,
-                auth=(args.username, args.password),
+                auth=(args.username, args.password) if args.password else None,
                 headers=headers,
                 data=query_body_json,
             )
@@ -239,7 +241,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 url,
                 verify=False,
                 headers=headers,
-                auth=(args.username, args.password),
+                auth=(args.username, args.password) if args.password else None,
                 params=params,
                 data=query_body_json,
             )
