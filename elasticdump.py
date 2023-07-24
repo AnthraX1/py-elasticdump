@@ -57,13 +57,15 @@ def getVersion():
         "{}/".format(args.host), verify=False, allow_redirects=args.follow_redirect
     )
     clusterinfo = r.json()
+    if args.debug:
+        display(r.text)
     varr = clusterinfo["version"]["number"].split(".")
     vv = ".".join(varr[0:-1])
     return float(vv)
 
 
 def getVersionKibana():
-    headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
+    headers = {"Content-Type": "application/json", "kbn-xsrf": "true", "osd-xsrf": "true"}
     r = requests.post(
         "{}/api/console/proxy?method=GET&path={}".format(args.host, quote_plus("/")),
         verify=False,
@@ -71,6 +73,8 @@ def getVersionKibana():
         allow_redirects=args.follow_redirect,
         auth=(args.username, args.password) if args.password else None,
     )
+    if args.debug:
+        display(r.text)
     clusterinfo = r.json()
     varr = clusterinfo["version"]["number"].split(".")
     vv = ".".join(varr[0:-1])
@@ -78,7 +82,7 @@ def getVersionKibana():
 
 
 def kibanaScroll(sid, session):
-    headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
+    headers = {"Content-Type": "application/json", "kbn-xsrf": "true","osd-xsrf": "true"}
     scroll_url = "{}/api/console/proxy?method=POST&path={}".format(
         args.host, quote_plus("/_search/scroll")
     )
@@ -107,7 +111,7 @@ def get_index_shard_count():
 
 
 def get_kibana_index_shard_count():
-    headers = {"Content-Type": "application/json", "kbn-xsrf": "true"}
+    headers = {"Content-Type": "application/json", "kbn-xsrf": "true", "kbn-xsrf": "true"}
     url = "{}/api/console/proxy?method=GET&path={}".format(
         args.host, quote_plus("_cat/shards/{}?format=json".format(args.index))
     )
@@ -116,6 +120,8 @@ def get_kibana_index_shard_count():
         auth=(args.username, args.password) if args.password else None,
         headers=headers
     )
+    if args.debug:
+        display(r.text)
     return len(r.json())
 
 
@@ -139,6 +145,10 @@ def search_after_dump(outq, alldone):
         params=params,
         data=query_body,
     )
+    if args.debug:
+        display(rt.request.headers)
+        display(rt.request.body)
+        display(rt.text)
     r = json.loads(rt.text)
     display("Total docs:" + str(r["hits"]["total"]))
     cnt = 0
@@ -187,6 +197,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
     if not os.path.isfile(session_file_name):
         if args.kibana and not args.kibana_esapi:
             headers["kbn-xsrf"] = "true"
+            headers["osd-xsrf"] = "true"
             scroll_path = quote_plus(
                 "/{}/_search?size={}&scroll={}".format(args.index, args.size, TIMEOUT)
             )
@@ -208,6 +219,10 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 headers=headers,
                 data=query_body_json,
             )
+            if args.debug:
+                display(rt.request.headers)
+                display(rt.request.body)
+                display(rt.text)
             if rt.status_code != 200:
                 display("Error:" + rt.text)
                 exit(1)
@@ -245,6 +260,10 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 params=params,
                 data=query_body_json,
             )
+            if args.debug:
+                display(rt.request.headers)
+                display(rt.request.body)
+                display(rt.text)
         r = json.loads(rt.text)
         if esversion <= 2.1 and "_scroll_id" in r:
             r = ES21scroll(r["_scroll_id"])
@@ -379,6 +398,7 @@ if __name__ == "__main__":
         help="Recover dump using search_after with sort by _doc",
         type=int,
     )
+    parser.add_argument("--debug", help="Print debug messages to STDERR", action="store_true")
     total = Value("i", 0)
     args = parser.parse_args()
 
