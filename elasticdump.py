@@ -18,7 +18,7 @@ COMPRESSION_HEADER = {"Accept-Encoding": "deflate, compress, gzip"}
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-def ES21scroll(sid):
+def ES21scroll(sid, session):
     headers = {"Content-Type": "application/json"}
     if args.C:
         headers.update(COMPRESSION_HEADER)
@@ -65,7 +65,11 @@ def getVersion():
 
 
 def getVersionKibana():
-    headers = {"Content-Type": "application/json", "kbn-xsrf": "true", "osd-xsrf": "true"}
+    headers = {
+        "Content-Type": "application/json",
+        "kbn-xsrf": "true",
+        "osd-xsrf": "true",
+    }
     r = requests.post(
         "{}/api/console/proxy?method=GET&path={}".format(args.host, quote_plus("/")),
         verify=False,
@@ -82,7 +86,11 @@ def getVersionKibana():
 
 
 def kibanaScroll(sid, session):
-    headers = {"Content-Type": "application/json", "kbn-xsrf": "true","osd-xsrf": "true"}
+    headers = {
+        "Content-Type": "application/json",
+        "kbn-xsrf": "true",
+        "osd-xsrf": "true",
+    }
     scroll_url = "{}/api/console/proxy?method=POST&path={}".format(
         args.host, quote_plus("/_search/scroll")
     )
@@ -111,14 +119,19 @@ def get_index_shard_count():
 
 
 def get_kibana_index_shard_count():
-    headers = {"Content-Type": "application/json", "kbn-xsrf": "true", "kbn-xsrf": "true"}
+    headers = {
+        "Content-Type": "application/json",
+        "kbn-xsrf": "true",
+        "kbn-xsrf": "true",
+    }
     url = "{}/api/console/proxy?method=GET&path={}".format(
         args.host, quote_plus("_cat/shards/{}?format=json".format(args.index))
     )
     r = session.post(
-        url, verify=False,
+        url,
+        verify=False,
         auth=(args.username, args.password) if args.password else None,
-        headers=headers
+        headers=headers,
     )
     if args.debug:
         display(r.text)
@@ -126,30 +139,60 @@ def get_kibana_index_shard_count():
 
 
 def search_after_dump(outq, alldone):
-    esversion = getVersion()
+    if args.kibana:
+        esversion = getVersionKibana()
+    else:
+        esversion = getVersion()
     if esversion < 2.1:
         alldone.set()
         exit("search_after is not supported before ES version 2.1")
     headers = {"Content-Type": "application/json"}
+    if args.kibana:
+        headers["kbn-xsrf"] = "true"
+        headers["osd-xsrf"] = "true"
+        kibana_search_path = quote_plus(
+            "/{}/_search?size={}".format(args.index, args.size)
+        )
+        if args.q:
+            kibana_search_path += quote_plus("&q={}".format(args.q))
+        if args.fields:
+            kibana_search_path += quote_plus("&_source={}".format(args.fields))
     if args.C:
         headers.update(COMPRESSION_HEADER)
+
     query_body = json.dumps({"search_after": [args.search_after], "sort": ["_doc"]})
-    params = {"size": args.size}
-    if args.q:
-        params["q"] = args.q
-    if args.fields:
-        params["_source"] = args.fields
-    rt = session.get(
-        "{}/{}/_search".format(args.host, args.index),
-        headers=headers,
-        params=params,
-        data=query_body,
-    )
+    if args.kibana:
+        rt = session.post(
+            "{}/api/console/proxy?method=POST&path={}".format(
+                args.host, kibana_search_path
+            ),
+            verify=False,
+            headers=headers,
+            auth=(args.username, args.password) if args.password else None
+            data=query_body,
+        )
+    else:
+        params = {"size": args.size}
+        if args.q:
+            params["q"] = args.q
+        if args.fields:
+            params["_source"] = args.fields
+        rt = session.get(
+            "{}/{}/_search".format(args.host, args.index),
+            headers=headers,
+            params=params,
+            data=query_body,
+        )
     if args.debug:
         display(rt.request.headers)
+        if args.kibana:
+            display(kibana_search_path)
         display(rt.request.body)
         display(rt.text)
     r = json.loads(rt.text)
+    if "hits" not in r:
+        display("Missing hits error: {}".format(rt.text))
+        exit(1)
     display("Total docs:" + str(r["hits"]["total"]))
     cnt = 0
     while True:
@@ -162,12 +205,24 @@ def search_after_dump(outq, alldone):
         last_sort_id = r["hits"]["hits"][-1]["sort"][0]
         display("\nlast sort id {}".format(last_sort_id), "\r")
         query_body = json.dumps({"search_after": [last_sort_id], "sort": ["_doc"]})
-        rt = session.get(
-            "{}/{}/_search".format(args.host, args.index),
-            headers=headers,
-            params=params,
-            data=query_body,
-        )
+        if args.kibana:
+            rt = session.post(
+                "{}/api/console/proxy?method=POST&path={}".format(
+                    args.host, kibana_search_path
+                ),
+                verify=False,
+                headers=headers,
+                auth=(args.username, args.password) if args.password else None
+                data=query_body,
+            )
+        else:
+            rt = session.get(
+                "{}/{}/_search".format(args.host, args.index),
+                headers=headers,
+                params=params,
+                auth=(args.username, args.password) if args.password else None
+                data=query_body,
+            )
         r = json.loads(rt.text)
     alldone.set()
     display("All done!", "\n")
@@ -179,6 +234,12 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         esversion = getVersionKibana()
     else:
         esversion = getVersion()
+    if esversion < 2.1:
+        scroll_func = ES21scroll
+    elif args.kibana:
+        scroll_func = kibanaScroll
+    else:
+        scroll_func = ESscroll
     session_file_name = "{}_{}".format(urlparse(args.host).netloc, args.index)
     query_body = {}
     if slice_id is not None and slice_max is not None:
@@ -272,12 +333,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         fs = open(session_file_name, "r")
         sid = fs.readlines()[0].strip()
         fs.close()
-        if esversion < 2.1:
-            r = ES21scroll(sid)
-        elif args.kibana:
-            r = kibanaScroll(sid, session)
-        else:
-            r = ESscroll(sid, session)
+        r = scroll_func(sid, session)
         display("Continue session...")
 
     if "_scroll_id" in r:
@@ -293,6 +349,9 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         if "hits" in r and len(r["hits"]["hits"]) == 0:
             break
         if "hits" not in r:
+            if r.get("statusCode") == 504:
+                display(r)
+                continue
             display("Missing hits error: {}".format(r))
             break
         if r.get("_scroll_id") is not None and sid != r["_scroll_id"]:
@@ -305,27 +364,12 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         display("Dumped {} documents".format(total.value), "\r")
         for row in r["hits"]["hits"]:
             outq.put(row)
-        if esversion < 2.1:
-            try:
-                r = ES21scroll(sid)
-            except Exception as e:
-                display(str(e))
-                display(json.dumps(r).decode("utf-8"))
-                continue
-        elif args.kibana:
-            try:
-                r = kibanaScroll(sid, session)
-            except Exception as e:
-                display(str(e))
-                display(json.dumps(r).decode("utf-8"))
-                continue
-        else:
-            try:
-                r = ESscroll(sid, session)
-            except Exception as e:
-                display(str(e))
-                display(json.dumps(r).decode("utf-8"))
-                continue
+        try:
+            r = scroll_func(sid, session)
+        except Exception as e:
+            display(str(e))
+            display(json.dumps(r).decode("utf-8"))
+            continue
     alldone.set()
     display("All done!")
 
@@ -398,7 +442,9 @@ if __name__ == "__main__":
         help="Recover dump using search_after with sort by _doc",
         type=int,
     )
-    parser.add_argument("--debug", help="Print debug messages to STDERR", action="store_true")
+    parser.add_argument(
+        "--debug", help="Print debug messages to STDERR", action="store_true"
+    )
     total = Value("i", 0)
     args = parser.parse_args()
 
