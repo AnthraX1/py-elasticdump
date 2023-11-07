@@ -212,7 +212,7 @@ def search_after_dump(outq, alldone):
                 ),
                 verify=False,
                 headers=headers,
-                auth=(args.username, args.password) if args.password else None
+                auth=(args.username, args.password) if args.password else None,
                 data=query_body,
             )
         else:
@@ -220,7 +220,7 @@ def search_after_dump(outq, alldone):
                 "{}/{}/_search".format(args.host, args.index),
                 headers=headers,
                 params=params,
-                auth=(args.username, args.password) if args.password else None
+                auth=(args.username, args.password) if args.password else None,
                 data=query_body,
             )
         r = json.loads(rt.text)
@@ -241,6 +241,12 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
     else:
         scroll_func = ESscroll
     session_file_name = "{}_{}".format(urlparse(args.host).netloc, args.index)
+    if len(session_file_name.encode("utf8")) > 255 - 32:
+        session_file_name = "{}_{}_{}".format(
+            urlparse(args.host).netloc,
+            args.index[:int(len(args.index)/2)],
+            hashlib.md5(args.index.encode()).hexdigest()[0:8]
+            )
     query_body = {}
     if slice_id is not None and slice_max is not None:
         session_file_name += "_{}_{}".format(slice_id, slice_max)
