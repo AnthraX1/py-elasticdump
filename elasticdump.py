@@ -168,7 +168,7 @@ def search_after_dump(outq, alldone):
             ),
             verify=False,
             headers=headers,
-            auth=(args.username, args.password) if args.password else None
+            auth=(args.username, args.password) if args.password else None,
             data=query_body,
         )
     else:
@@ -244,9 +244,9 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
     if len(session_file_name.encode("utf8")) > 255 - 32:
         session_file_name = "{}_{}_{}".format(
             urlparse(args.host).netloc,
-            args.index[:int(len(args.index)/2)],
-            hashlib.md5(args.index.encode()).hexdigest()[0:8]
-            )
+            args.index[: int(len(args.index) / 2)],
+            hashlib.md5(args.index.encode()).hexdigest()[0:8],
+        )
     query_body = {}
     if slice_id is not None and slice_max is not None:
         session_file_name += "_{}_{}".format(slice_id, slice_max)
@@ -406,8 +406,8 @@ if __name__ == "__main__":
         "--sort",
         help="sort parameter with _search request. Example: 'sort=field1,field2:asc'",
     )
-    parser.add_argument("--username", help="Username to auth with")
-    parser.add_argument("--password", help="Password to auth with")
+    parser.add_argument("-u", "--username", help="Username to auth with")
+    parser.add_argument("-p", "--password", help="Password to auth with")
     parser.add_argument(
         "--follow_redirect", help="Follow http redirects", type=bool, default=True
     )
