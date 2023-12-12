@@ -54,7 +54,8 @@ def ESscroll(sid, session):
 
 def getVersion():
     r = requests.get(
-        "{}/".format(args.host), verify=False, allow_redirects=args.follow_redirect
+        "{}/".format(args.host), verify=False, allow_redirects=args.follow_redirect,
+        auth=(args.username, args.password) if args.password else None,
     )
     clusterinfo = r.json()
     if args.debug:
