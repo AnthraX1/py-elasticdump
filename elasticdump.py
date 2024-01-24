@@ -54,8 +54,7 @@ def ESscroll(sid, session):
 
 def getVersion():
     r = requests.get(
-        "{}/".format(args.host), verify=False, allow_redirects=args.follow_redirect,
-        auth=(args.username, args.password) if args.password else None,
+        "{}/".format(args.host), verify=False, allow_redirects=args.follow_redirect
     )
     clusterinfo = r.json()
     if args.debug:
@@ -140,60 +139,30 @@ def get_kibana_index_shard_count():
 
 
 def search_after_dump(outq, alldone):
-    if args.kibana:
-        esversion = getVersionKibana()
-    else:
-        esversion = getVersion()
+    esversion = getVersion()
     if esversion < 2.1:
         alldone.set()
         exit("search_after is not supported before ES version 2.1")
     headers = {"Content-Type": "application/json"}
-    if args.kibana:
-        headers["kbn-xsrf"] = "true"
-        headers["osd-xsrf"] = "true"
-        kibana_search_path = quote_plus(
-            "/{}/_search?size={}".format(args.index, args.size)
-        )
-        if args.q:
-            kibana_search_path += quote_plus("&q={}".format(args.q))
-        if args.fields:
-            kibana_search_path += quote_plus("&_source={}".format(args.fields))
     if args.C:
         headers.update(COMPRESSION_HEADER)
-
     query_body = json.dumps({"search_after": [args.search_after], "sort": ["_doc"]})
-    if args.kibana:
-        rt = session.post(
-            "{}/api/console/proxy?method=POST&path={}".format(
-                args.host, kibana_search_path
-            ),
-            verify=False,
-            headers=headers,
-            auth=(args.username, args.password) if args.password else None,
-            data=query_body,
-        )
-    else:
-        params = {"size": args.size}
-        if args.q:
-            params["q"] = args.q
-        if args.fields:
-            params["_source"] = args.fields
-        rt = session.get(
-            "{}/{}/_search".format(args.host, args.index),
-            headers=headers,
-            params=params,
-            data=query_body,
-        )
+    params = {"size": args.size}
+    if args.q:
+        params["q"] = args.q
+    if args.fields:
+        params["_source"] = args.fields
+    rt = session.get(
+        "{}/{}/_search".format(args.host, args.index),
+        headers=headers,
+        params=params,
+        data=query_body,
+    )
     if args.debug:
         display(rt.request.headers)
-        if args.kibana:
-            display(kibana_search_path)
         display(rt.request.body)
         display(rt.text)
     r = json.loads(rt.text)
-    if "hits" not in r:
-        display("Missing hits error: {}".format(rt.text))
-        exit(1)
     display("Total docs:" + str(r["hits"]["total"]))
     cnt = 0
     while True:
@@ -206,24 +175,12 @@ def search_after_dump(outq, alldone):
         last_sort_id = r["hits"]["hits"][-1]["sort"][0]
         display("\nlast sort id {}".format(last_sort_id), "\r")
         query_body = json.dumps({"search_after": [last_sort_id], "sort": ["_doc"]})
-        if args.kibana:
-            rt = session.post(
-                "{}/api/console/proxy?method=POST&path={}".format(
-                    args.host, kibana_search_path
-                ),
-                verify=False,
-                headers=headers,
-                auth=(args.username, args.password) if args.password else None,
-                data=query_body,
-            )
-        else:
-            rt = session.get(
-                "{}/{}/_search".format(args.host, args.index),
-                headers=headers,
-                params=params,
-                auth=(args.username, args.password) if args.password else None,
-                data=query_body,
-            )
+        rt = session.get(
+            "{}/{}/_search".format(args.host, args.index),
+            headers=headers,
+            params=params,
+            data=query_body,
+        )
         r = json.loads(rt.text)
     alldone.set()
     display("All done!", "\n")
@@ -235,19 +192,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         esversion = getVersionKibana()
     else:
         esversion = getVersion()
-    if esversion < 2.1:
-        scroll_func = ES21scroll
-    elif args.kibana:
-        scroll_func = kibanaScroll
-    else:
-        scroll_func = ESscroll
     session_file_name = "{}_{}".format(urlparse(args.host).netloc, args.index)
-    if len(session_file_name.encode("utf8")) > 255 - 32:
-        session_file_name = "{}_{}_{}".format(
-            urlparse(args.host).netloc,
-            args.index[: int(len(args.index) / 2)],
-            hashlib.md5(args.index.encode()).hexdigest()[0:8],
-        )
     query_body = {}
     if slice_id is not None and slice_max is not None:
         session_file_name += "_{}_{}".format(slice_id, slice_max)
@@ -340,6 +285,12 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         fs = open(session_file_name, "r")
         sid = fs.readlines()[0].strip()
         fs.close()
+        if esversion < 2.1:
+            scroll_func = ES21scroll
+        elif args.kibana:
+            scroll_func = kibanaScroll
+        else:
+            scroll_func = ESscroll
         r = scroll_func(sid, session)
         display("Continue session...")
 
@@ -372,7 +323,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         for row in r["hits"]["hits"]:
             outq.put(row)
         try:
-            r = scroll_func(sid, session)
+            r = scroll_func(sid)
         except Exception as e:
             display(str(e))
             display(json.dumps(r).decode("utf-8"))
@@ -407,8 +358,8 @@ if __name__ == "__main__":
         "--sort",
         help="sort parameter with _search request. Example: 'sort=field1,field2:asc'",
     )
-    parser.add_argument("-u", "--username", help="Username to auth with")
-    parser.add_argument("-p", "--password", help="Password to auth with")
+    parser.add_argument("--username", help="Username to auth with")
+    parser.add_argument("--password", help="Password to auth with")
     parser.add_argument(
         "--follow_redirect", help="Follow http redirects", type=bool, default=True
     )
