@@ -13,7 +13,10 @@ from multiprocessing import Process, Queue, Value, Event
 # ES default to 24 hours max
 TIMEOUT = "1d"
 session = requests.Session()
-COMPRESSION_HEADER = {"Accept-Encoding": "deflate, compress, gzip"}
+COMPRESSION_HEADER = {
+    "Accept-Encoding": "deflate, compress, gzip",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/118.0",
+}
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -38,6 +41,7 @@ def ESscroll(sid, session):
     if args.C:
         headers.update(COMPRESSION_HEADER)
     if args.kibana_esapi:
+        headers.update({"kbn-xsrf": "true", "osd-xsrf": "true"})
         url = "{}/elasticsearch/_search/scroll".format(args.host)
     else:
         url = "{}/_search/scroll".format(args.host)
@@ -53,8 +57,13 @@ def ESscroll(sid, session):
 
 
 def getVersion():
+    url = "{}/".format(args.host)
+    if args.kibana_esapi:
+        url = "{}/elasticsearch/".format(args.host)
     r = requests.get(
-        "{}/".format(args.host), verify=False, allow_redirects=args.follow_redirect,
+        url,
+        verify=False,
+        allow_redirects=args.follow_redirect,
         auth=(args.username, args.password) if args.password else None,
     )
     clusterinfo = r.json()
@@ -159,7 +168,9 @@ def search_after_dump(outq, alldone):
         if args.fields:
             kibana_search_path += quote_plus("&_source={}".format(args.fields))
         if args.excludes:
-            kibana_search_path += quote_plus("&_source_excludes={}".format(args.excludes))
+            kibana_search_path += quote_plus(
+                "&_source_excludes={}".format(args.excludes)
+            )
     if args.C:
         headers.update(COMPRESSION_HEADER)
 
@@ -182,8 +193,12 @@ def search_after_dump(outq, alldone):
             params["_source"] = args.fields
         if args.excludes:
             params["_source_excludes"] = args.excludes
+        if args.kibana_esapi:
+            url = "{}/elasticsearch/{}/_search".format(args.host, args.index)
+        else:
+            url = "{}/{}/_search".format(args.host, args.index)
         rt = session.get(
-            "{}/{}/_search".format(args.host, args.index),
+            url,
             headers=headers,
             params=params,
             data=query_body,
@@ -210,24 +225,20 @@ def search_after_dump(outq, alldone):
         last_sort_id = r["hits"]["hits"][-1]["sort"][0]
         display("\nlast sort id {}".format(last_sort_id), "\r")
         query_body = json.dumps({"search_after": [last_sort_id], "sort": ["_doc"]})
+        query_kwargs = {
+            "verify": False,
+            "headers": headers,
+            "data": query_body,
+        }
+        if args.password and args.username:
+            query_kwargs["auth"] = (args.username, args.password)
         if args.kibana:
-            rt = session.post(
-                "{}/api/console/proxy?method=POST&path={}".format(
-                    args.host, kibana_search_path
-                ),
-                verify=False,
-                headers=headers,
-                auth=(args.username, args.password) if args.password else None,
-                data=query_body,
+            url = "{}/api/console/proxy?method=POST&path={}".format(
+                args.host, kibana_search_path
             )
         else:
-            rt = session.get(
-                "{}/{}/_search".format(args.host, args.index),
-                headers=headers,
-                params=params,
-                auth=(args.username, args.password) if args.password else None,
-                data=query_body,
-            )
+            url = "{}/{}/_search".format(args.host, args.index)
+        rt = session.get(url, **query_kwargs)
         r = json.loads(rt.text)
     alldone.set()
     display("All done!", "\n")
@@ -267,7 +278,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
     if args.C:
         headers.update(COMPRESSION_HEADER)
     if not os.path.isfile(session_file_name):
-        if args.kibana and not args.kibana_esapi:
+        if args.kibana:
             headers["kbn-xsrf"] = "true"
             headers["osd-xsrf"] = "true"
             scroll_path = quote_plus(
@@ -283,16 +294,18 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 scroll_path += quote_plus("&sort={}".format(args.sort))
             else:
                 scroll_path += quote_plus("&sort=_doc")
-            query_body_json = json.dumps(query_body)
-            rt = session.post(
-                "{}/api/console/proxy?method=POST&path={}".format(
+            query_kwargs = {
+                "url": "{}/api/console/proxy?method=POST&path={}".format(
                     args.host, scroll_path
                 ),
-                verify=False,
-                auth=(args.username, args.password) if args.password else None,
-                headers=headers,
-                data=query_body_json,
-            )
+                "verify": False,
+                "headers": headers,
+            }
+            if args.password and args.username:
+                query_kwargs["auth"] = (args.username, args.password)
+            if args.query:
+                query_kwargs["data"] = json.dumps(query_body)
+            rt = session.post(**query_kwargs)
             if args.debug:
                 display(rt.request.headers)
                 display(rt.request.body)
@@ -316,33 +329,28 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                     params["sort"] = args.sort
                 else:
                     params["sort"] = ["_doc"]
-            query_body_json = json.dumps(query_body)
             if args.kibana_esapi:
                 url = "{}/elasticsearch/{}/_search".format(args.host, args.index)
-                display(
-                    "params:"
-                    + str(params)
-                    + "\n"
-                    + "query_body:"
-                    + str(query_body_json)
-                )
             else:
                 url = "{}/{}/_search".format(args.host, args.index)
-            rt = session.get(
-                url,
-                verify=False,
-                headers=headers,
-                auth=(args.username, args.password) if args.password else None,
-                params=params,
-                data=query_body_json,
-            )
+            query_kwargs = {
+                "url": url,
+                "verify": False,
+                "headers": headers,
+                "params": params,
+            }
+            if args.password and args.username:
+                query_kwargs["auth"] = (args.username, args.password)
+            if query_body:
+                query_kwargs["data"] = json.dumps(query_body)
+            rt = session.get(**query_kwargs)
             if args.debug:
                 display(rt.request.headers)
                 display(rt.request.body)
                 display(rt.text)
         r = json.loads(rt.text)
         if esversion <= 2.1 and "_scroll_id" in r:
-            r = ES21scroll(r["_scroll_id"])
+            r = scroll_func(r["_scroll_id"], session)
         display("Total docs (or in this slice):" + str(r["hits"]["total"]), "\n")
     else:
         fs = open(session_file_name, "r")
@@ -412,7 +420,8 @@ if __name__ == "__main__":
         "--fields", help="Filter output source fields. Separate keys with , (comma)."
     )
     parser.add_argument(
-        "--excludes", help="Exclude output source fields using _source_excludes. Separate fields with , (comma)."
+        "--excludes",
+        help="Exclude output source fields using _source_excludes. Separate fields with , (comma).",
     )
     parser.add_argument(
         "--sort",
