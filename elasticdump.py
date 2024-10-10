@@ -221,14 +221,14 @@ def search_after_dump(outq, alldone):
         cnt += len(r["hits"]["hits"])
         for row in r["hits"]["hits"]:
             outq.put(row)
-        display("Dumped {} documents".format(cnt), "\r")
         last_sort_id = r["hits"]["hits"][-1]["sort"][0]
-        display("\nlast sort id {}".format(last_sort_id), "\r")
+        display("Dumped {} documents\nlast sort id {}".format(cnt, last_sort_id), "\r")
         query_body = json.dumps({"search_after": [last_sort_id], "sort": ["_doc"]})
         query_kwargs = {
             "verify": False,
             "headers": headers,
             "data": query_body,
+            "params": params,
         }
         if args.password and args.username:
             query_kwargs["auth"] = (args.username, args.password)
