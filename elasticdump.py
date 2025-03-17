@@ -123,9 +123,25 @@ def display(msg, end="\n"):
 
 def get_index_shard_count():
     r = session.get(
-        "{}/_cat/shards/{}?format=json".format(args.host, args.index), verify=False
+        "{}/_cat/shards/{}?format=json".format(args.host, args.index),
+        verify=False,
+        auth=(args.username, args.password) if args.password else None,
     )
     return len(r.json())
+
+
+def delete_search_tasks():
+    headers = {"Content-Type": "application/json"}
+    if args.C:
+        headers.update(COMPRESSION_HEADER)
+    r = session.post(
+        "{}/_tasks/_cancel?actions=*search*".format(args.host),
+        verify=False,
+        auth=(args.username, args.password) if args.password else None,
+        headers=COMPRESSION_HEADER
+    )
+    if args.debug:
+        display(r.text)
 
 
 def get_kibana_index_shard_count():
@@ -197,6 +213,8 @@ def search_after_dump(outq, alldone):
             url = "{}/elasticsearch/{}/_search".format(args.host, args.index)
         else:
             url = "{}/{}/_search".format(args.host, args.index)
+        if args.bruteforce:
+            delete_search_tasks()
         rt = session.get(
             url,
             headers=headers,
@@ -238,6 +256,9 @@ def search_after_dump(outq, alldone):
             )
         else:
             url = "{}/{}/_search".format(args.host, args.index)
+            if args.bruteforce:
+                delete_search_tasks()
+
         rt = session.get(url, **query_kwargs)
         r = json.loads(rt.text)
     alldone.set()
@@ -343,6 +364,8 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 query_kwargs["auth"] = (args.username, args.password)
             if query_body:
                 query_kwargs["data"] = json.dumps(query_body)
+            if args.bruteforce:
+                delete_search_tasks()
             rt = session.get(**query_kwargs)
             if args.debug:
                 display(rt.request.headers)
@@ -356,6 +379,8 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         fs = open(session_file_name, "r")
         sid = fs.readlines()[0].strip()
         fs.close()
+        if args.bruteforce:
+            delete_search_tasks()
         r = scroll_func(sid, session)
         display("Continue session...")
 
@@ -387,6 +412,8 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         display("Dumped {} documents".format(total.value), "\r")
         for row in r["hits"]["hits"]:
             outq.put(row)
+        if args.bruteforce:
+            delete_search_tasks()
         try:
             r = scroll_func(sid, session)
         except Exception as e:
@@ -426,6 +453,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sort",
         help="sort parameter with _search request. Example: 'sort=field1,field2:asc'",
+    )
+    parser.add_argument(
+        "-b",
+        "--bruteforce",
+        help="Clear all search tasks before executing the query.\nThis will disrupt the remote server.\nUse with caution.",
+        action="store_true",
+        default=False,
     )
     parser.add_argument("-u", "--username", help="Username to auth with")
     parser.add_argument("-p", "--password", help="Password to auth with")
