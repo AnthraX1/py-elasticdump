@@ -213,7 +213,7 @@ def search_after_dump(outq, alldone):
             url = "{}/elasticsearch/{}/_search".format(args.host, args.index)
         else:
             url = "{}/{}/_search".format(args.host, args.index)
-        if args.bruteforce:
+        if args.clear_tasks:
             delete_search_tasks()
         rt = session.get(
             url,
@@ -236,6 +236,8 @@ def search_after_dump(outq, alldone):
     while True:
         if "hits" in r and len(r["hits"]["hits"]) == 0:
             break
+        if args.debug and "hits" not in r:
+            display("Missing hits error: {}".format(r))
         cnt += len(r["hits"]["hits"])
         for row in r["hits"]["hits"]:
             outq.put(row)
@@ -246,20 +248,23 @@ def search_after_dump(outq, alldone):
             "verify": False,
             "headers": headers,
             "data": query_body,
-            "params": params,
         }
         if args.password and args.username:
             query_kwargs["auth"] = (args.username, args.password)
         if args.kibana:
+            query_kwargs["method"] = "POST"
             url = "{}/api/console/proxy?method=POST&path={}".format(
                 args.host, kibana_search_path
             )
         else:
             url = "{}/{}/_search".format(args.host, args.index)
-            if args.bruteforce:
+            query_kwargs["params"] = params
+            query_kwargs["method"] = "GET"
+            if args.clear_tasks:
                 delete_search_tasks()
-
-        rt = session.get(url, **query_kwargs)
+        if args.debug:
+            display(query_kwargs)
+        rt = session.request(url, **query_kwargs)
         r = json.loads(rt.text)
     alldone.set()
     display("All done!", "\n")
@@ -364,7 +369,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
                 query_kwargs["auth"] = (args.username, args.password)
             if query_body:
                 query_kwargs["data"] = json.dumps(query_body)
-            if args.bruteforce:
+            if args.clear_tasks:
                 delete_search_tasks()
             rt = session.get(**query_kwargs)
             if args.debug:
@@ -379,7 +384,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         fs = open(session_file_name, "r")
         sid = fs.readlines()[0].strip()
         fs.close()
-        if args.bruteforce:
+        if args.clear_tasks:
             delete_search_tasks()
         r = scroll_func(sid, session)
         display("Continue session...")
@@ -412,7 +417,7 @@ def dump(outq, alldone, total, slice_id=None, slice_max=None):
         display("Dumped {} documents".format(total.value), "\r")
         for row in r["hits"]["hits"]:
             outq.put(row)
-        if args.bruteforce:
+        if args.clear_tasks:
             delete_search_tasks()
         try:
             r = scroll_func(sid, session)
@@ -455,12 +460,13 @@ if __name__ == "__main__":
         help="sort parameter with _search request. Example: 'sort=field1,field2:asc'",
     )
     parser.add_argument(
-        "-b",
-        "--bruteforce",
+        "--clear-tasks",
+        "--clear-task",
         help="Clear all search tasks before executing the query.\nThis will disrupt the remote server.\nUse with caution.",
         action="store_true",
         default=False,
     )
+    parser.add_argument("-ignore-errors", help="Ignore all errors and keep retrying", action="store_true")
     parser.add_argument("-u", "--username", help="Username to auth with")
     parser.add_argument("-p", "--password", help="Password to auth with")
     parser.add_argument(
