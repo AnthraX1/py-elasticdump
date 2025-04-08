@@ -27,4 +27,9 @@ optional arguments:
   --slices SLICES       Number of slices to use. Default to None (no slice). This uses sliced scroll in ES.
   --search_after SEARCH_AFTER
                         Recover dump using search_after with sort by _doc
+Output options:
+  --output OUTPUT       Output filename to export. Default stdout
+  --output-rewrite      Rewrite output file if exists
+  --output-splitsize OUTPUT_SPLITSIZE
+                        Split output into multiple files by line count
 ```
