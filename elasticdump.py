@@ -220,6 +220,7 @@ def search_after_dump(outq, alldone):
             headers=headers,
             params=params,
             data=query_body,
+            verify=False,
         )
     if args.debug:
         display(rt.request.headers)
