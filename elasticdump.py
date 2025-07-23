@@ -265,7 +265,7 @@ def search_after_dump(outq, alldone):
                 delete_search_tasks()
         if args.debug:
             display(query_kwargs)
-        rt = session.request(url, **query_kwargs)
+        rt = session.request(url=url, **query_kwargs)
         r = json.loads(rt.text)
     alldone.set()
     display("All done!", "\n")
